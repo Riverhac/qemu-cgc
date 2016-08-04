@@ -124,6 +124,18 @@ obj-y += gdbstub.o user-exec.o
 endif #CONFIG_BSD_USER
 
 #########################################################
+# CGC user emulator target
+
+ifdef CONFIG_CGC_USER
+
+QEMU_CFLAGS+=-I$(SRC_PATH)/cgc-user/$(TARGET_ABI_DIR) -I$(SRC_PATH)/cgc-user
+
+obj-y += cgc-user/
+obj-y += gdbstub.o thunk.o user-exec.o
+
+endif #CONFIG_CGC_USER
+
+#########################################################
 # System emulator target
 ifdef CONFIG_SOFTMMU
 obj-y += arch_init.o cpus.o monitor.o gdbstub.o balloon.o ioport.o numa.o

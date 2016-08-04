@@ -2,6 +2,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -150,9 +151,9 @@ int loader_exec(int fdexec, const char *filename, char **argv, char **envp,
 
     if(retval>=0) {
         if (bprm->buf[0] == 0x7f
-                && bprm->buf[1] == 'E'
-                && bprm->buf[2] == 'L'
-                && bprm->buf[3] == 'F') {
+                && bprm->buf[1] == 'C'
+                && bprm->buf[2] == 'G'
+                && bprm->buf[3] == 'C') {
             retval = load_elf_binary(bprm, infop);
 #if defined(TARGET_HAS_BFLT)
         } else if (bprm->buf[0] == 'b'
@@ -165,6 +166,43 @@ int loader_exec(int fdexec, const char *filename, char **argv, char **envp,
             return -ENOEXEC;
         }
     }
+#ifdef CONFIG_CGC_USER
+    abi_long flag_page = 0;
+
+    #define FLAG_PAGE 0x4347C000
+    #define FLAG_PAGE_SIZE 4096
+
+    // abi_long stack_page = 0;
+
+    #define STACK_INIT_VALUE 0xbaaaaffc
+    #define STACK_PAGE_LIMIT ((STACK_INIT_VALUE & 0xFFFFFFFFFFFFF000) + 0x1000)
+    #define STACK_PAGE_SIZE 4096
+    #define STACK_PAGES_NUM ((infop->start_stack - infop->stack_limit) / STACK_PAGE_SIZE + 1)
+#endif
+
+#ifdef CONFIG_CGC_USER
+    flag_page = target_mmap(FLAG_PAGE, FLAG_PAGE_SIZE,
+                            PROT_READ|PROT_WRITE,
+                            MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+    uint32_t *ptr = lock_user(VERIFY_READ, flag_page, FLAG_PAGE_SIZE, 0);
+    int fi;
+    for (fi = 0; fi < FLAG_PAGE_SIZE / 4; fi += 1) {
+        ptr[fi] = 0x4342434C; // LCBC
+    }
+    unlock_user(ptr, flag_page, FLAG_PAGE_SIZE);
+
+    abi_long stack_start = STACK_PAGE_LIMIT - STACK_PAGES_NUM * STACK_PAGE_SIZE;
+    target_mmap(stack_start, STACK_PAGE_SIZE * STACK_PAGES_NUM,
+                            PROT_READ|PROT_WRITE|PROT_EXEC,
+                            MAP_ANONYMOUS|MAP_PRIVATE|MAP_STACK, -1, 0);
+#endif
+
+#ifdef CONFIG_CGC_USER
+    regs->ecx = flag_page;
+    infop->start_stack = STACK_INIT_VALUE;
+    infop->stack_limit = STACK_PAGE_LIMIT;
+#endif
+
 
     if(retval>=0) {
         /* success.  Initialize important registers */

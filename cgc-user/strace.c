@@ -149,7 +149,7 @@ print_signal(abi_ulong arg, int last)
     gemu_log("%s%s", signal_name, get_comma(last));
 }
 
-#ifdef TARGET_NR__newselect
+#if defined(TARGET_NR__newselect) || defined(TARGET_NR_fdwait)
 static void
 print_fdset(int n, abi_ulong target_fds_addr)
 {
@@ -295,13 +295,11 @@ print_syscall_ret_addr(const struct syscallname *name, abi_long ret)
     }
 }
 
-#if 0 /* currently unused */
 static void
-print_syscall_ret_raw(struct syscallname *name, abi_long ret)
+print_syscall_ret_raw(const struct syscallname *name, abi_long ret)
 {
         gemu_log(" = 0x" TARGET_ABI_FMT_lx "\n", ret);
 }
-#endif
 
 #ifdef TARGET_NR__newselect
 static void
@@ -318,6 +316,145 @@ print_syscall_ret_newselect(const struct syscallname *name, abi_long ret)
     gemu_log(")\n");
 }
 #endif
+
+#ifdef TARGET_NR_fdwait
+static long fdwait_arg1 = 0;
+static long fdwait_arg2 = 0;
+static long fdwait_arg3 = 0;
+static long fdwait_arg4 = 0;
+static long fdwait_arg5 = 0;
+
+static void
+print_fdwait(const struct syscallname *name,
+             abi_long arg1, abi_long arg2, abi_long arg3,
+             abi_long arg4, abi_long arg5, abi_long arg6)
+{
+    print_syscall_prologue(name);
+    print_raw_param(TARGET_ABI_FMT_ld, arg1, 0);
+    print_fdset(arg1, arg2);
+    gemu_log(",");
+    print_fdset(arg1, arg3);
+    gemu_log(",");
+    print_timeval(arg4, 0);
+    print_pointer(arg5, 1);
+    print_syscall_epilogue(name);
+
+    fdwait_arg1 = arg1;
+    fdwait_arg2 = arg2;
+    fdwait_arg3 = arg3;
+    fdwait_arg4 = arg4;
+    fdwait_arg5 = arg5;
+}
+#endif
+
+#ifdef TARGET_NR_allocate
+static long allocate_retaddr = 0;
+
+static void
+print_allocate(const struct syscallname *name,
+    abi_long arg0, abi_long arg1, abi_long arg2,
+    abi_long arg3, abi_long arg4, abi_long arg5)
+{
+    print_syscall_prologue(name);
+    print_raw_param(TARGET_ABI_FMT_ld, arg0, 0);
+    print_raw_param(TARGET_ABI_FMT_ld, arg1, 0);
+    print_pointer(arg2, 1);
+    print_syscall_epilogue(name);
+
+    allocate_retaddr = arg2;
+}
+#endif
+
+#ifdef TARGET_NR_fdwait
+static void
+print_syscall_ret_fdwait(const struct syscallname *name, abi_long ret)
+{
+    const char *errstr = NULL;
+    if (ret < 0) {
+        errstr = target_strerror(-ret);
+    }
+    if (errstr) {
+        gemu_log(" = -1 errno=" TARGET_ABI_FMT_ld " (%s)\n",
+                 -ret, errstr);
+    } else {
+        gemu_log(" = 0 ");
+        print_number(fdwait_arg5, 1);
+        gemu_log(" (");
+        print_fdset(fdwait_arg1, fdwait_arg2);
+        gemu_log(",");
+        print_fdset(fdwait_arg1, fdwait_arg3);
+        gemu_log(",");
+        print_timeval(fdwait_arg4, 1);
+        gemu_log(")\n");
+    }
+}
+#endif
+
+#ifdef TARGET_NR_allocate
+static void
+print_syscall_ret_allocate(const struct syscallname *name, abi_long ret)
+{
+    const char *errstr = NULL;
+    if (ret < 0) {
+        errstr = target_strerror(-ret);
+    }
+    if (errstr) {
+        gemu_log(" = -1 errno=" TARGET_ABI_FMT_ld " (%s)\n",
+                 -ret, errstr);
+    } else {
+        gemu_log(" = 0 ");
+        if (allocate_retaddr == 0) {
+            gemu_log("NULL");
+        } else {
+            long ptr;
+            get_user_sal(ptr, allocate_retaddr);
+            gemu_log("[");
+            print_pointer(ptr, 1);
+            gemu_log("]");
+        }
+        gemu_log("\n");
+    }
+}
+#endif
+
+
+#ifdef TARGET_NR_random
+static long random_retaddr = 0;
+
+static void
+print_random(const struct syscallname *name,
+             abi_long arg1, abi_long arg2, abi_long arg3,
+             abi_long arg4, abi_long arg5, abi_long arg6)
+{
+    print_syscall_prologue(name);
+    print_pointer(arg1, 0);
+    print_raw_param(TARGET_ABI_FMT_ld, arg2, 0);
+    print_pointer(arg3, 1);
+    print_syscall_epilogue(name);
+
+    random_retaddr = arg3;
+}
+#endif
+
+#ifdef TARGET_NR_random
+static void
+print_syscall_ret_random(const struct syscallname *name, abi_long ret)
+{
+    const char *errstr = NULL;
+    if (ret < 0) {
+        errstr = target_strerror(-ret);
+    }
+    if (errstr) {
+        gemu_log(" = -1 errno=" TARGET_ABI_FMT_ld " (%s)\n",
+                 -ret, errstr);
+    } else {
+        gemu_log(" = 0 ");
+        print_number(random_retaddr, 1);
+        gemu_log("\n");
+    }
+}
+#endif
+
 
 UNUSED static struct flags access_flags[] = {
     FLAG_GENERIC(F_OK),
@@ -1435,24 +1572,6 @@ print_utimensat(const struct syscallname *name,
     print_flags(at_file_flags, arg3, 1);
     print_syscall_epilogue(name);
 }
-#endif
-
-#if defined(TARGET_NR_mmap) || defined(TARGET_NR_mmap2)
-static void
-print_mmap(const struct syscallname *name,
-    abi_long arg0, abi_long arg1, abi_long arg2,
-    abi_long arg3, abi_long arg4, abi_long arg5)
-{
-    print_syscall_prologue(name);
-    print_pointer(arg0, 0);
-    print_raw_param("%d", arg1, 0);
-    print_flags(mmap_prot_flags, arg2, 0);
-    print_flags(mmap_flags, arg3, 0);
-    print_raw_param("%d", arg4, 0);
-    print_raw_param("%#x", arg5, 1);
-    print_syscall_epilogue(name);
-}
-#define print_mmap2     print_mmap
 #endif
 
 #ifdef TARGET_NR_mprotect

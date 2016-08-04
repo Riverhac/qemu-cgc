@@ -935,6 +935,7 @@ static void setup_frame(int sig, struct target_sigaction *ka,
 		/* This is popl %eax ; movl $,%eax ; int $0x80 */
                 val16 = 0xb858;
         __put_user(val16, (uint16_t *)(frame->retcode+0));
+#define TARGET_NR_sigreturn 100
         __put_user(TARGET_NR_sigreturn, (int *)(frame->retcode+2));
                 val16 = 0x80cd;
         __put_user(val16, (uint16_t *)(frame->retcode+6));
@@ -1007,6 +1008,7 @@ static void setup_rt_frame(int sig, struct target_sigaction *ka,
         __put_user(addr, &frame->pretcode);
 		/* This is movl $,%eax ; int $0x80 */
         __put_user(0xb8, (char *)(frame->retcode+0));
+#define TARGET_NR_rt_sigreturn 101
         __put_user(TARGET_NR_rt_sigreturn, (int *)(frame->retcode+1));
                 val16 = 0x80cd;
         __put_user(val16, (uint16_t *)(frame->retcode+5));

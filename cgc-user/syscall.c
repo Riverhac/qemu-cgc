@@ -238,6 +238,7 @@ _syscall1(int,exit_group,int,error_code)
 #if defined(TARGET_NR_set_tid_address) && defined(__NR_set_tid_address)
 _syscall1(int,set_tid_address,int *,tidptr)
 #endif
+#define TARGET_NR_futex
 #if defined(TARGET_NR_futex) && defined(__NR_futex)
 _syscall6(int,sys_futex,int *,uaddr,int,op,int,val,
           const struct timespec *,timeout,int *,uaddr2,int,val3)
@@ -259,6 +260,27 @@ _syscall2(int, ioprio_get, int, which, int, who)
 #endif
 #if defined(TARGET_NR_ioprio_set) && defined(__NR_ioprio_set)
 _syscall3(int, ioprio_set, int, which, int, who, int, ioprio)
+#endif
+
+#define TARGET_NR_getrandom
+#if defined(TARGET_NR_getrandom) && defined(__NR_getrandom)
+_syscall3(int, getrandom, void *, buf, size_t, buflen, unsigned int, flags)
+#endif
+
+#ifdef TARGET_NR_random
+static int URANDOM_FD = -1;
+static int get_urandom_fd(void);
+static int get_urandom_fd(void)
+{
+    int newfd = -1;
+    if (URANDOM_FD == -1) {
+        newfd = open("/dev/urandom", O_RDONLY);
+        if (!__sync_bool_compare_and_swap(&URANDOM_FD, -1, newfd)) {
+            close(newfd);
+        }
+    }
+    return URANDOM_FD;
+}
 #endif
 
 static bitmask_transtbl fcntl_flags_tbl[] = {
@@ -411,6 +433,7 @@ _syscall4(int, sys_prlimit64, pid_t, pid, int, resource,
 #endif
 
 
+#define TARGET_NR_timer_create
 #if defined(TARGET_NR_timer_create)
 /* Maxiumum of 32 active POSIX timers allowed at any one time. */
 static timer_t g_posix_timers[32] = { 0, } ;
@@ -1001,6 +1024,7 @@ static inline abi_long copy_to_user_mq_attr(abi_ulong target_mq_attr_addr,
 }
 #endif
 
+#define TARGET_NR_select
 #if defined(TARGET_NR_select) || defined(TARGET_NR__newselect)
 /* do_select() must return target values and target errnos. */
 static abi_long do_select(int n,
@@ -4110,7 +4134,7 @@ static const StructEntry struct_termios_def = {
     .size = { sizeof(struct target_termios), sizeof(struct host_termios) },
     .align = { __alignof__(struct target_termios), __alignof__(struct host_termios) },
 };
-
+/*
 static bitmask_transtbl mmap_flags_tbl[] = {
 	{ TARGET_MAP_SHARED, TARGET_MAP_SHARED, MAP_SHARED, MAP_SHARED },
 	{ TARGET_MAP_PRIVATE, TARGET_MAP_PRIVATE, MAP_PRIVATE, MAP_PRIVATE },
@@ -4124,7 +4148,7 @@ static bitmask_transtbl mmap_flags_tbl[] = {
           MAP_NORESERVE },
 	{ 0, 0, 0, 0 }
 };
-
+*/
 #if defined(TARGET_I386)
 
 /* NOTE: there is really one LDT for all the threads */
@@ -5522,8 +5546,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 {
     CPUState *cpu = ENV_GET_CPU(cpu_env);
     abi_long ret;
-    struct stat st;
-    struct statfs stfs;
+    //struct stat st;
+    //struct statfs stfs;
     void *p;
 
 #ifdef DEBUG
@@ -5533,7 +5557,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         print_syscall(num, arg1, arg2, arg3, arg4, arg5, arg6);
 
     switch(num) {
-    case TARGET_NR_exit:
+    case TARGET_NR_terminate:
         /* In old applications this may be used to implement _exit(2).
            However in threaded applictions it is used for thread termination,
            and _exit_group is used for application termination.
@@ -5565,22 +5589,43 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         _exit(arg1);
         ret = 0; /* avoid warning */
         break;
-    case TARGET_NR_read:
-        if (arg3 == 0)
-            ret = 0;
-        else {
-            if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
-                goto efault;
-            ret = get_errno(read(arg1, p, arg3));
-            unlock_user(p, arg2, ret);
+    case TARGET_NR_receive:
+        {
+            if (arg3 == 0)
+                ret = 0;
+            else {
+                if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
+                    goto efault;
+                abi_ulong retsz = arg4;
+                ret = get_errno(read(arg1, p, arg3));
+                if (!is_error(ret)) {
+                    if (retsz) {
+                        if (put_user_u32(ret, retsz))
+                            goto efault;
+                    }
+                    ret = 0;
+                }
+                unlock_user(p, arg2, ret);
+            }
         }
         break;
-    case TARGET_NR_write:
-        if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
-            goto efault;
-        ret = get_errno(write(arg1, p, arg3));
-        unlock_user(p, arg2, 0);
+    case TARGET_NR_transmit:
+        {
+            abi_ulong retsz = arg4;
+            if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
+                goto efault;
+            ret = get_errno(write(arg1, p, arg3));
+            if (!is_error(ret)) {
+                if (retsz) {
+                    if (put_user_u32(ret, retsz))
+                        goto efault;
+                }
+                ret = 0;
+            }
+            unlock_user(p, arg2, 0);
+        }
         break;
+#ifdef TARGET_NR_open
     case TARGET_NR_open:
         if (!(p = lock_user_string(arg1)))
             goto efault;
@@ -5606,6 +5651,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_fork:
         ret = get_errno(do_fork(cpu_env, SIGCHLD, 0, 0, 0, 0));
         break;
+#endif
 #ifdef TARGET_NR_waitpid
     case TARGET_NR_waitpid:
         {
@@ -5640,6 +5686,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg1, 0);
         break;
 #endif
+#ifdef TARGET_NR_link
     case TARGET_NR_link:
         {
             void * p2;
@@ -5653,6 +5700,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             unlock_user(p, arg1, 0);
         }
         break;
+#endif
 #if defined(TARGET_NR_linkat)
     case TARGET_NR_linkat:
         {
@@ -5670,12 +5718,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_unlink
     case TARGET_NR_unlink:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(unlink(p));
         unlock_user(p, arg1, 0);
         break;
+#endif
 #if defined(TARGET_NR_unlinkat)
     case TARGET_NR_unlinkat:
         if (!(p = lock_user_string(arg2)))
@@ -5684,6 +5734,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         break;
 #endif
+#ifdef TARGET_NR_execve
     case TARGET_NR_execve:
         {
             char **argp, **envp;
@@ -5774,12 +5825,15 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
+#ifdef TARGET_NR_chdir
     case TARGET_NR_chdir:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(chdir(p));
         unlock_user(p, arg1, 0);
         break;
+#endif
 #ifdef TARGET_NR_time
     case TARGET_NR_time:
         {
@@ -5792,12 +5846,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_mknod
     case TARGET_NR_mknod:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(mknod(p, arg2, arg3));
         unlock_user(p, arg1, 0);
         break;
+#endif
 #if defined(TARGET_NR_mknodat)
     case TARGET_NR_mknodat:
         if (!(p = lock_user_string(arg2)))
@@ -5806,12 +5862,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         break;
 #endif
+#ifdef TARGET_NR_chmod
     case TARGET_NR_chmod:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(chmod(p, arg2));
         unlock_user(p, arg1, 0);
         break;
+#endif
 #ifdef TARGET_NR_break
     case TARGET_NR_break:
         goto unimplemented;
@@ -5820,9 +5878,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_oldstat:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_lseek
     case TARGET_NR_lseek:
         ret = get_errno(lseek(arg1, arg2, arg3));
         break;
+#endif
 #if defined(TARGET_NR_getxpid) && defined(TARGET_ALPHA)
     /* Alpha specific */
     case TARGET_NR_getxpid:
@@ -5835,6 +5895,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(getpid());
         break;
 #endif
+#ifdef TARGET_NR_mount
     case TARGET_NR_mount:
         {
             /* need to look at the data field */
@@ -5890,6 +5951,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
 #ifdef TARGET_NR_umount
     case TARGET_NR_umount:
         if (!(p = lock_user_string(arg1)))
@@ -5908,8 +5970,10 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_ptrace
     case TARGET_NR_ptrace:
         goto unimplemented;
+#endif
 #ifdef TARGET_NR_alarm /* not on alpha */
     case TARGET_NR_alarm:
         ret = alarm(arg1);
@@ -5946,6 +6010,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_utimes
     case TARGET_NR_utimes:
         {
             struct timeval *tvp, tv[2];
@@ -5964,6 +6029,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             unlock_user(p, arg1, 0);
         }
         break;
+#endif
 #if defined(TARGET_NR_futimesat)
     case TARGET_NR_futimesat:
         {
@@ -5992,12 +6058,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_gtty:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_access
     case TARGET_NR_access:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(access(path(p), arg2));
         unlock_user(p, arg1, 0);
         break;
+#endif
 #if defined(TARGET_NR_faccessat) && defined(__NR_faccessat)
     case TARGET_NR_faccessat:
         if (!(p = lock_user_string(arg2)))
@@ -6015,6 +6083,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_ftime:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_sync
     case TARGET_NR_sync:
         sync();
         ret = 0;
@@ -6035,6 +6104,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             unlock_user(p, arg1, 0);
         }
         break;
+#endif
 #if defined(TARGET_NR_renameat)
     case TARGET_NR_renameat:
         {
@@ -6050,12 +6120,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_mkdir
     case TARGET_NR_mkdir:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(mkdir(p, arg2));
         unlock_user(p, arg1, 0);
         break;
+#endif
 #if defined(TARGET_NR_mkdirat)
     case TARGET_NR_mkdirat:
         if (!(p = lock_user_string(arg2)))
@@ -6064,6 +6136,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         break;
 #endif
+#ifdef TARGET_NR_rmdir
     case TARGET_NR_rmdir:
         if (!(p = lock_user_string(arg1)))
             goto efault;
@@ -6076,12 +6149,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_pipe:
         ret = do_pipe(cpu_env, arg1, 0, 0);
         break;
+#endif
 #ifdef TARGET_NR_pipe2
     case TARGET_NR_pipe2:
         ret = do_pipe(cpu_env, arg1,
                       target_to_host_bitmask(arg2, fcntl_flags_tbl), 1);
         break;
 #endif
+#ifdef TARGET_NR_times
     case TARGET_NR_times:
         {
             struct target_tms *tmsp;
@@ -6100,6 +6175,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                 ret = host_to_target_clock_t(ret);
         }
         break;
+#endif
 #ifdef TARGET_NR_prof
     case TARGET_NR_prof:
         goto unimplemented;
@@ -6108,6 +6184,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_signal:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_acct
     case TARGET_NR_acct:
         if (arg1 == 0) {
             ret = get_errno(acct(NULL));
@@ -6118,6 +6195,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             unlock_user(p, arg1, 0);
         }
         break;
+#endif
 #ifdef TARGET_NR_umount2
     case TARGET_NR_umount2:
         if (!(p = lock_user_string(arg1)))
@@ -6130,19 +6208,25 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_lock:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_ioctl
     case TARGET_NR_ioctl:
         ret = do_ioctl(arg1, arg2, arg3);
         break;
+#endif
+#ifdef TARGET_NR_fcntl
     case TARGET_NR_fcntl:
         ret = do_fcntl(arg1, arg2, arg3);
         break;
+#endif
 #ifdef TARGET_NR_mpx
     case TARGET_NR_mpx:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_setpgid
     case TARGET_NR_setpgid:
         ret = get_errno(setpgid(arg1, arg2));
         break;
+#endif
 #ifdef TARGET_NR_ulimit
     case TARGET_NR_ulimit:
         goto unimplemented;
@@ -6151,6 +6235,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_oldolduname:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_umask
     case TARGET_NR_umask:
         ret = get_errno(umask(arg1));
         break;
@@ -6165,6 +6250,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_dup2:
         ret = get_errno(dup2(arg1, arg2));
         break;
+#endif
 #if defined(CONFIG_DUP3) && defined(TARGET_NR_dup3)
     case TARGET_NR_dup3:
         ret = get_errno(dup3(arg1, arg2, arg3));
@@ -6174,13 +6260,13 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_getppid:
         ret = get_errno(getppid());
         break;
-#endif
     case TARGET_NR_getpgrp:
         ret = get_errno(getpgrp());
         break;
     case TARGET_NR_setsid:
         ret = get_errno(setsid());
         break;
+#endif
 #ifdef TARGET_NR_sigaction
     case TARGET_NR_sigaction:
         {
@@ -6263,6 +6349,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_rt_sigaction
     case TARGET_NR_rt_sigaction:
         {
 #if defined(TARGET_ALPHA)
@@ -6313,6 +6400,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #endif
         }
         break;
+#endif
 #ifdef TARGET_NR_sgetmask /* not on alpha */
     case TARGET_NR_sgetmask:
         {
@@ -6408,6 +6496,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_rt_sigprocmask
     case TARGET_NR_rt_sigprocmask:
         {
             int how = arg1;
@@ -6446,6 +6535,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
 #ifdef TARGET_NR_sigpending
     case TARGET_NR_sigpending:
         {
@@ -6460,6 +6550,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_rt_sigpending
     case TARGET_NR_rt_sigpending:
         {
             sigset_t set;
@@ -6472,6 +6563,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
 #ifdef TARGET_NR_sigsuspend
     case TARGET_NR_sigsuspend:
         {
@@ -6489,6 +6581,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_rt_sigsuspend
     case TARGET_NR_rt_sigsuspend:
         {
             sigset_t set;
@@ -6499,6 +6592,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = get_errno(sigsuspend(&set));
         }
         break;
+#endif
+#ifdef TARGET_NR_rt_sigtimedwait
     case TARGET_NR_rt_sigtimedwait:
         {
             sigset_t set;
@@ -6530,6 +6625,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
+#ifdef TARGET_NR_rt_sigqueueinfo
     case TARGET_NR_rt_sigqueueinfo:
         {
             siginfo_t uinfo;
@@ -6540,22 +6637,28 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = get_errno(sys_rt_sigqueueinfo(arg1, arg2, &uinfo));
         }
         break;
+#endif
 #ifdef TARGET_NR_sigreturn
     case TARGET_NR_sigreturn:
         /* NOTE: ret is eax, so not transcoding must be done */
         ret = do_sigreturn(cpu_env);
         break;
 #endif
+#ifdef TARGET_NR_rt_sigreturn
     case TARGET_NR_rt_sigreturn:
         /* NOTE: ret is eax, so not transcoding must be done */
         ret = do_rt_sigreturn(cpu_env);
         break;
+#endif
+#ifdef TARGET_NR_sethostname
     case TARGET_NR_sethostname:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(sethostname(p, arg2));
         unlock_user(p, arg1, 0);
         break;
+#endif
+#ifdef TARGET_NR_setrlimit
     case TARGET_NR_setrlimit:
         {
             int resource = target_to_host_resource(arg1);
@@ -6626,9 +6729,20 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = get_errno(settimeofday(ptv, ptz));
         }
         break;
-#if defined(TARGET_NR_select)
-    case TARGET_NR_select:
-#if defined(TARGET_S390X) || defined(TARGET_ALPHA)
+#endif
+#if defined(TARGET_NR_fdwait)
+    case TARGET_NR_fdwait:
+#if defined(CONFIG_CGC_USER)
+        {
+            ret = do_select(arg1, arg2, arg3, 0, arg4);
+            if (ret > 0) {
+                if (arg5) {
+                    put_user(ret, arg5, abi_ulong);
+                }
+                ret = 0;
+            }
+        }
+#elif defined(TARGET_S390X) || defined(TARGET_ALPHA)
         ret = do_select(arg1, arg2, arg3, arg4, arg5);
 #else
         {
@@ -6753,6 +6867,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_symlink
     case TARGET_NR_symlink:
         {
             void *p2;
@@ -6766,6 +6881,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             unlock_user(p, arg1, 0);
         }
         break;
+#endif
 #if defined(TARGET_NR_symlinkat)
     case TARGET_NR_symlinkat:
         {
@@ -6784,7 +6900,6 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR_oldlstat
     case TARGET_NR_oldlstat:
         goto unimplemented;
-#endif
     case TARGET_NR_readlink:
         {
             void *p2;
@@ -6815,6 +6930,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             unlock_user(p, arg1, 0);
         }
         break;
+#endif
 #if defined(TARGET_NR_readlinkat)
     case TARGET_NR_readlinkat:
         {
@@ -6848,6 +6964,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg1, 0);
         break;
 #endif
+#ifdef TARGET_NR_reboot
     case TARGET_NR_reboot:
         if (arg3 == LINUX_REBOOT_CMD_RESTART2) {
            /* arg4 must be ignored in all other cases */
@@ -6861,38 +6978,40 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
            ret = get_errno(reboot(arg1, arg2, arg3, NULL));
         }
         break;
+#endif
 #ifdef TARGET_NR_readdir
     case TARGET_NR_readdir:
         goto unimplemented;
 #endif
-#ifdef TARGET_NR_mmap
-    case TARGET_NR_mmap:
-#if (defined(TARGET_I386) && defined(TARGET_ABI32)) || \
-    (defined(TARGET_ARM) && defined(TARGET_ABI32)) || \
-    defined(TARGET_M68K) || defined(TARGET_CRIS) || defined(TARGET_MICROBLAZE) \
-    || defined(TARGET_S390X)
-        {
-            abi_ulong *v;
-            abi_ulong v1, v2, v3, v4, v5, v6;
-            if (!(v = lock_user(VERIFY_READ, arg1, 6 * sizeof(abi_ulong), 1)))
-                goto efault;
-            v1 = tswapal(v[0]);
-            v2 = tswapal(v[1]);
-            v3 = tswapal(v[2]);
-            v4 = tswapal(v[3]);
-            v5 = tswapal(v[4]);
-            v6 = tswapal(v[5]);
-            unlock_user(v, arg1, 0);
-            ret = get_errno(target_mmap(v1, v2, v3,
-                                        target_to_host_bitmask(v4, mmap_flags_tbl),
-                                        v5, v6));
-        }
-#else
+#ifdef TARGET_NR_allocate
+    case TARGET_NR_allocate:
+    {
+        int prot = PROT_READ | PROT_WRITE;
+        abi_ulong len = arg1;
+        abi_ulong is_x = arg2;
+        abi_ulong ret_addr = arg3;
+        if (is_x)
+            prot |= PROT_EXEC;
+
+        arg1 = 0;    // addr
+        arg2 = len;
+        arg3 = prot;
+        arg4 = TARGET_MAP_PRIVATE | TARGET_MAP_ANONYMOUS;
+        arg5 = 0;
+        arg6 = 0;
         ret = get_errno(target_mmap(arg1, arg2, arg3,
-                                    target_to_host_bitmask(arg4, mmap_flags_tbl),
+                                    arg4,
                                     arg5,
                                     arg6));
-#endif
+        if (!is_error(ret)) {
+            if (ret_addr && ret) {
+                if (put_user_u32(ret, ret_addr))
+                    goto efault;
+            }
+            ret = 0;
+        }
+    }
+
         break;
 #endif
 #ifdef TARGET_NR_mmap2
@@ -6906,9 +7025,12 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                                     arg6 << MMAP_SHIFT));
         break;
 #endif
-    case TARGET_NR_munmap:
+#ifdef TARGET_NR_deallocate
+    case TARGET_NR_deallocate:
         ret = get_errno(target_munmap(arg1, arg2));
         break;
+#endif
+#ifdef TARGET_NR_mprotect
     case TARGET_NR_mprotect:
         {
             TaskState *ts = cpu->opaque;
@@ -6923,6 +7045,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         ret = get_errno(target_mprotect(arg1, arg2, arg3));
         break;
+#endif
 #ifdef TARGET_NR_mremap
     case TARGET_NR_mremap:
         ret = get_errno(target_mremap(arg1, arg2, arg3, arg4, arg5));
@@ -6954,6 +7077,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(munlockall());
         break;
 #endif
+#ifdef TARGET_NR_truncate
     case TARGET_NR_truncate:
         if (!(p = lock_user_string(arg1)))
             goto efault;
@@ -6966,6 +7090,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_fchmod:
         ret = get_errno(fchmod(arg1, arg2));
         break;
+#endif
 #if defined(TARGET_NR_fchmodat)
     case TARGET_NR_fchmodat:
         if (!(p = lock_user_string(arg2)))
@@ -6974,6 +7099,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         break;
 #endif
+#ifdef TARGET_NR_getpriority
     case TARGET_NR_getpriority:
         /* Note that negative values are valid for getpriority, so we must
            differentiate based on errno settings.  */
@@ -6991,13 +7117,17 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = 20 - ret;
 #endif
         break;
+#endif
+#ifdef TARGET_NR_setpriority
     case TARGET_NR_setpriority:
         ret = get_errno(setpriority(arg1, arg2, arg3));
         break;
+#endif
 #ifdef TARGET_NR_profil
     case TARGET_NR_profil:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_statfs
     case TARGET_NR_statfs:
         if (!(p = lock_user_string(arg1)))
             goto efault;
@@ -7027,6 +7157,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_fstatfs:
         ret = get_errno(fstatfs(arg1, &stfs));
         goto convert_statfs;
+#endif
 #ifdef TARGET_NR_statfs64
     case TARGET_NR_statfs64:
         if (!(p = lock_user_string(arg1)))
@@ -7169,7 +7300,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = do_setsockopt(arg1, arg2, arg3, arg4, (socklen_t) arg5);
         break;
 #endif
-
+#ifdef TARGET_NR_syslog
     case TARGET_NR_syslog:
         if (!(p = lock_user_string(arg2)))
             goto efault;
@@ -7253,6 +7384,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
 #ifdef TARGET_NR_olduname
     case TARGET_NR_olduname:
         goto unimplemented;
@@ -7261,9 +7393,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_iopl:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_vhangup
     case TARGET_NR_vhangup:
         ret = get_errno(vhangup());
         break;
+#endif
 #ifdef TARGET_NR_idle
     case TARGET_NR_idle:
         goto unimplemented;
@@ -7274,6 +7408,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                          arg6, arg7, arg8, 0);
         break;
 #endif
+#ifdef TARGET_NR_wait4
     case TARGET_NR_wait4:
         {
             int status;
@@ -7301,6 +7436,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
 #ifdef TARGET_NR_swapoff
     case TARGET_NR_swapoff:
         if (!(p = lock_user_string(arg1)))
@@ -7309,6 +7445,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg1, 0);
         break;
 #endif
+#ifdef TARGET_NR_sysinfo
     case TARGET_NR_sysinfo:
         {
             struct target_sysinfo *target_value;
@@ -7336,6 +7473,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
 #ifdef TARGET_NR_ipc
     case TARGET_NR_ipc:
 	ret = do_ipc(arg1, arg2, arg3, arg4, arg5, arg6);
@@ -7396,6 +7534,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = do_shmdt(arg1);
         break;
 #endif
+#ifdef TARGET_NR_fsync
     case TARGET_NR_fsync:
         ret = get_errno(fsync(arg1));
         break;
@@ -7416,6 +7555,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(do_fork(cpu_env, arg1, arg2, arg3, arg5, arg4));
 #endif
         break;
+#endif
+#ifdef TARGET_NR_exit_group
 #ifdef __NR_exit_group
         /* new thread calls */
     case TARGET_NR_exit_group:
@@ -7465,14 +7606,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #endif
     case TARGET_NR_adjtimex:
         goto unimplemented;
+#endif
 #ifdef TARGET_NR_create_module
     case TARGET_NR_create_module:
-#endif
     case TARGET_NR_init_module:
     case TARGET_NR_delete_module:
+#endif
 #ifdef TARGET_NR_get_kernel_syms
     case TARGET_NR_get_kernel_syms:
-#endif
         goto unimplemented;
     case TARGET_NR_quotactl:
         goto unimplemented;
@@ -7482,6 +7623,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_fchdir:
         ret = get_errno(fchdir(arg1));
         break;
+#endif
 #ifdef TARGET_NR_bdflush /* not on x86_64 */
     case TARGET_NR_bdflush:
         goto unimplemented;
@@ -7489,10 +7631,10 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR_sysfs
     case TARGET_NR_sysfs:
         goto unimplemented;
-#endif
     case TARGET_NR_personality:
         ret = get_errno(personality(arg1));
         break;
+#endif
 #ifdef TARGET_NR_afs_syscall
     case TARGET_NR_afs_syscall:
         goto unimplemented;
@@ -7516,7 +7658,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
-#endif
+#ifdef TARGET_NR_getdents
     case TARGET_NR_getdents:
 #ifdef __NR_getdents
 #if TARGET_ABI_BITS == 32 && HOST_LONG_BITS == 64
@@ -7751,6 +7893,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_flock
     case TARGET_NR_flock:
         /* NOTE: the flock constant seems to be the same for every
            Linux platform */
@@ -7781,11 +7924,13 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_getsid:
         ret = get_errno(getsid(arg1));
         break;
+#endif
 #if defined(TARGET_NR_fdatasync) /* Not on alpha (osf_datasync ?) */
     case TARGET_NR_fdatasync:
         ret = get_errno(fdatasync(arg1));
         break;
 #endif
+#ifdef TARGET_NR__sysctl
     case TARGET_NR__sysctl:
         /* We don't implement this, but ENOTDIR is always a safe
            return value. */
@@ -7934,6 +8079,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             }
         }
         break;
+#endif
+#endif
 #ifdef TARGET_NR_query_module
     case TARGET_NR_query_module:
         goto unimplemented;
@@ -7942,6 +8089,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_nfsservctl:
         goto unimplemented;
 #endif
+#ifdef TARGET_NR_prctl
     case TARGET_NR_prctl:
         switch (arg1) {
         case PR_GET_PDEATHSIG:
@@ -7984,6 +8132,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             break;
         }
         break;
+#endif
 #ifdef TARGET_NR_arch_prctl
     case TARGET_NR_arch_prctl:
 #if defined(TARGET_I386) && !defined(TARGET_ABI32)
@@ -8015,6 +8164,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         break;
 #endif
+#ifdef TARGET_NR_getcwd
     case TARGET_NR_getcwd:
         if (!(p = lock_user(VERIFY_WRITE, arg1, arg2, 0)))
             goto efault;
@@ -8102,6 +8252,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #endif
 
 #ifdef CONFIG_SENDFILE
+#ifdef TARGET_NR_sendfile
     case TARGET_NR_sendfile:
     {
         off_t *offp = NULL;
@@ -8122,6 +8273,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
     }
+#endif
 #ifdef TARGET_NR_sendfile64
     case TARGET_NR_sendfile64:
     {
@@ -8145,11 +8297,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     }
 #endif
 #else
+#ifdef TARGET_NR_sendfile
     case TARGET_NR_sendfile:
+#endif
 #ifdef TARGET_NR_sendfile64
     case TARGET_NR_sendfile64:
 #endif
         goto unimplemented;
+#endif
 #endif
 
 #ifdef TARGET_NR_getpmsg
@@ -8237,12 +8392,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             ret = host_to_target_stat64(cpu_env, arg3, &st);
         break;
 #endif
+#ifdef TARGET_NR_lchown
     case TARGET_NR_lchown:
         if (!(p = lock_user_string(arg1)))
             goto efault;
         ret = get_errno(lchown(p, low2highuid(arg2), low2highgid(arg3)));
         unlock_user(p, arg1, 0);
         break;
+#endif
 #ifdef TARGET_NR_getuid
     case TARGET_NR_getuid:
         ret = get_errno(high2lowuid(getuid()));
@@ -8263,6 +8420,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(high2lowgid(getegid()));
         break;
 #endif
+#ifdef TARGET_NR_setreuid
     case TARGET_NR_setreuid:
         ret = get_errno(setreuid(low2highuid(arg1), low2highuid(arg2)));
         break;
@@ -8314,6 +8472,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_fchown:
         ret = get_errno(fchown(arg1, low2highuid(arg2), low2highgid(arg3)));
         break;
+#endif
 #if defined(TARGET_NR_fchownat)
     case TARGET_NR_fchownat:
         if (!(p = lock_user_string(arg2))) 
@@ -8365,6 +8524,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
         break;
 #endif
+#ifdef TARGET_NR_chown
     case TARGET_NR_chown:
         if (!(p = lock_user_string(arg1)))
             goto efault;
@@ -8383,7 +8543,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_setfsgid:
         ret = get_errno(setfsgid(arg1));
         break;
-
+#endif
+#endif
 #ifdef TARGET_NR_lchown32
     case TARGET_NR_lchown32:
         if (!(p = lock_user_string(arg1)))
@@ -8721,9 +8882,10 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(setfsgid(arg1));
         break;
 #endif
-
+#ifdef TARGET_NR_pivot_root
     case TARGET_NR_pivot_root:
         goto unimplemented;
+#endif
 #ifdef TARGET_NR_mincore
     case TARGET_NR_mincore:
         {
@@ -8781,6 +8943,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(0);
         break;
 #endif
+#ifdef TARGET_NR_fcntl64
 #if TARGET_ABI_BITS == 32
     case TARGET_NR_fcntl64:
     {
@@ -8881,6 +9044,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 	break;
     }
 #endif
+#endif
 #ifdef TARGET_NR_cacheflush
     case TARGET_NR_cacheflush:
         /* self-modifying code is handled automatically, so nothing needed */
@@ -8896,9 +9060,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = TARGET_PAGE_SIZE;
         break;
 #endif
+#ifdef TARGET_NR_gettid
     case TARGET_NR_gettid:
         ret = get_errno(gettid());
         break;
+#endif
 #ifdef TARGET_NR_readahead
     case TARGET_NR_readahead:
 #if TARGET_ABI_BITS == 32
@@ -9232,9 +9398,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
 	break;
 #endif
+#ifdef TARGET_NR_futex_none
     case TARGET_NR_futex:
         ret = do_futex(arg1, arg2, arg3, arg4, arg5, arg6);
         break;
+#endif
 #if defined(TARGET_NR_inotify_init) && defined(__NR_inotify_init)
     case TARGET_NR_inotify_init:
         ret = get_errno(sys_inotify_init());
@@ -9627,7 +9795,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     }
 #endif
 
-#ifdef TARGET_NR_timer_create
+#ifdef TARGET_NR_timer_create_none
     case TARGET_NR_timer_create:
     {
         /* args: clockid_t clockid, struct sigevent *sevp, timer_t *timerid */
@@ -9809,9 +9977,46 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(unshare(arg1));
         break;
 #endif
+#ifdef TARGET_NR_random
+    case TARGET_NR_random:
+        p = lock_user(VERIFY_WRITE, arg1, arg2, 0);
+        if (!p) {
+            goto efault;
+        }
+ #ifdef __NR_getrandom
+  #ifdef CONFIG_CGC_USER
+        ret = get_errno(getrandom(p, arg2, 0));
+        if (ret > 0) {
+            if (arg3) {
+                put_user(ret, arg3, abi_ulong);
+           }
+           ret = 0;
+        }
+  #else
+        ret = get_errno(getrandom(p, arg2, arg3));
+  #endif
+        unlock_user(p, arg1, ret);
+        break;
+ #else
+   #ifdef CONFIG_CGC_USER
+        abi_ulong count = arg2;
+        if (count > (INT_MAX >> 6)) {
+            count = INT_MAX >> 6;
+        }
+        ret = get_errno(read(get_urandom_fd(), p, count));
+        if (ret > 0) {
+            if (arg3) {
+                put_user(ret, arg3, abi_ulong);
+           }
+           ret = 0;
+        }
+        break;
+   #endif
+ #endif
+#endif
 
     default:
-    unimplemented:
+    //unimplemented:
         gemu_log("qemu: Unsupported syscall: %d\n", num);
 #if defined(TARGET_NR_setxattr) || defined(TARGET_NR_get_thread_area) || defined(TARGET_NR_getdomainname) || defined(TARGET_NR_set_robust_list)
     unimplemented_nowarn:

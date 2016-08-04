@@ -138,8 +138,8 @@
 #ifdef TARGET_NR_exec_with_loader
 { TARGET_NR_exec_with_loader, "exec_with_loader" , NULL, NULL, NULL },
 #endif
-#ifdef TARGET_NR_exit
-{ TARGET_NR_exit, "exit" , "%s(%d)\n", NULL, NULL },
+#ifdef TARGET_NR_terminate
+{ TARGET_NR_terminate, "terminate" , "%s(%d)\n", NULL, NULL },
 #endif
 #ifdef TARGET_NR__exit
 { TARGET_NR__exit, "_exit" , "%s(%d)\n", NULL, NULL },
@@ -513,8 +513,8 @@
 #ifdef TARGET_NR_mlockall
 { TARGET_NR_mlockall, "mlockall" , NULL, NULL, NULL },
 #endif
-#ifdef TARGET_NR_mmap
-{ TARGET_NR_mmap, "mmap" , NULL, print_mmap, print_syscall_ret_addr },
+#ifdef TARGET_NR_allocate
+{ TARGET_NR_allocate, "allocate" , NULL, print_allocate, print_syscall_ret_allocate },
 #endif
 #ifdef TARGET_NR_mmap2
 { TARGET_NR_mmap2, "mmap2" , NULL, print_mmap2, print_syscall_ret_addr },
@@ -581,6 +581,9 @@
 #endif
 #ifdef TARGET_NR_munmap
 { TARGET_NR_munmap, "munmap" , NULL, print_munmap, NULL },
+#endif
+#ifdef TARGET_NR_deallocate
+{ TARGET_NR_deallocate, "deallocate" , "%s(%p,%d)", NULL, NULL },
 #endif
 #ifdef TARGET_NR_nanosleep
 { TARGET_NR_nanosleep, "nanosleep" , NULL, NULL, NULL },
@@ -999,8 +1002,8 @@
 #ifdef TARGET_NR_quotactl
 { TARGET_NR_quotactl, "quotactl" , NULL, NULL, NULL },
 #endif
-#ifdef TARGET_NR_read
-{ TARGET_NR_read, "read" , "%s(%d,%#x,%d)", NULL, NULL },
+#ifdef TARGET_NR_receive
+{ TARGET_NR_receive, "receive" , "%s(%d,%#x,%d)", NULL, NULL },
 #endif
 #ifdef TARGET_NR_readahead
 { TARGET_NR_readahead, "readahead" , NULL, NULL, NULL },
@@ -1116,8 +1119,8 @@
 #ifdef TARGET_NR_security
 { TARGET_NR_security, "security" , NULL, NULL, NULL },
 #endif
-#ifdef TARGET_NR_select
-{ TARGET_NR_select, "select" , NULL, NULL, NULL },
+#ifdef TARGET_NR_fdwait
+{ TARGET_NR_fdwait, "fdwait" , NULL, print_fdwait, print_syscall_ret_fdwait },
 #endif
 #ifdef TARGET_NR_semctl
 { TARGET_NR_semctl, "semctl" , NULL, print_semctl, NULL },
@@ -1518,8 +1521,8 @@
 #ifdef TARGET_NR_waitpid
 { TARGET_NR_waitpid, "waitpid" , "%s(%d,%p,%#x)", NULL, NULL },
 #endif
-#ifdef TARGET_NR_write
-{ TARGET_NR_write, "write" , "%s(%d,%#x,%d)", NULL, NULL },
+#ifdef TARGET_NR_transmit
+{ TARGET_NR_transmit, "transmit" , "%s(%d,%#x,%d)", NULL, NULL },
 #endif
 #ifdef TARGET_NR_writev
 { TARGET_NR_writev, "writev" , "%s(%d,%p,%#x)", NULL, NULL },
@@ -1541,4 +1544,7 @@
 #endif
 #ifdef TARGET_NR_atomic_barrier
 { TARGET_NR_atomic_barrier, "atomic_barrier", NULL, NULL, NULL },
+#endif
+#ifdef TARGET_NR_random
+{ TARGET_NR_random, "random", NULL, print_random, print_syscall_ret_random },
 #endif
